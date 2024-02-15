@@ -85,6 +85,114 @@ def reverse(
     return s_fictitious
 
 
+def reverse_lfx(
+    s: iDEA.system.System,
+    target_n: np.ndarray,
+    method: Container,
+    v_guess: np.ndarray = None,
+    mu: float = 0.1,  # TODO V Ravindran Decide on the default
+    tol: float = 1e-8,  # TODO V Ravindran Decide on the default
+    silent: bool = False,
+    **kwargs
+) -> iDEA.state.State:
+    r"""
+    Determines what ficticious system is needed for a given method, when solving the system, to produce a given target density.
+    If the given target density is from solving the interacting electron problem (iDEA.methods.interacting), and the method is the non-interacting electron solver (iDEA.methods.non_interacting)
+    the output is the Kohn-Sham system.
+
+    The method used is that of T W Hollins et al.,J Phys.: Condens. Matter 29, 04LT01 (2017), which is defined by the formula:
+    .. math:: \mathrm{V}_\mathrm{ext} \rightarrow \mu * V_h[n_\mathrm{target}-n]
+    where :math:`V_h` is the Hartree potential associated with the density difference :math:`n_\mathrm{target}-n`.
+
+    The objective functional is the Hartree energy associated with the difference :math:`n_\mathrm{target}-n`.
+    | Args:
+    |     s: iDEA.system.System, System object.
+    |     target_n: np.ndarray, Target density to reverse engineer.
+    |     method: Container, The method used to solve the system.
+    |     v_guess: np.ndarray, The initial guess of the fictitious potential. (default = None)
+    |     mu: float = 1.0, Reverse engineering parameter mu. (default = 1.0)
+    |     tol: float, Tolerance of convergence. (default = 1e-12)
+    |     silent: bool, Set to true to prevent printing. (default = False)
+    |     kwargs: Other arguments that will be given to the method's solve function.
+
+    | Returns:
+    |     s_fictitious: iDEA.system.System, fictitious system object.
+
+    """
+    s_fictitious = copy.deepcopy(s)
+    if v_guess is not None:
+        s_fictitious.v_ext = v_guess
+    n = np.zeros(shape=s.x.shape)
+    up_n = np.zeros(shape=s.x.shape)
+    down_n = np.zeros(shape=s.x.shape)
+    p = np.zeros(shape=s.x.shape * 2)
+    up_p = np.zeros(shape=s.x.shape * 2)
+    down_p = np.zeros(shape=s.x.shape * 2)
+    nsteps = 0
+
+    # Compute an initial fictious state based on the initial effective potential of the ficticious system
+    print("iDEA.reverse_engineering.reverse_lfx: Calculating initial trial density and potential")
+    state = method.solve(
+        s_fictitious,
+        initial=(n, up_n, down_n, p, up_p, down_p),
+        silent=True,
+        **kwargs
+    )
+
+    n, up_n, down_n = iDEA.observables.density(
+        s_fictitious, state=state, return_spins=True
+    )
+    p, up_p, down_p = iDEA.observables.density_matrix(
+        s_fictitious, state=state, return_spins=True
+    )
+
+    diff_n = target_n - n
+
+    # Calculate correction the potential of the ficticious system and objective functional
+    v_correct = iDEA.observables.hartree_potential(s, diff_n)
+    convergence = iDEA.observables.hartree_energy(s, diff_n, v_correct)
+
+    # Now do the inversion for real
+    while convergence > tol:
+        nsteps += 1
+        if silent is False:
+            print(
+                r"iDEA.reverse_engineering.reverse_lfx: convergence = {0:.5}, tolerance = {1:.5}".format(
+                    convergence, tol
+                ),
+                end="\r",
+            )
+
+        s_fictitious.v_ext -= mu * v_correct
+
+        # Update the density assocciated with the effective potential of ficticious system
+        state = method.solve(
+            s_fictitious,
+            initial=(n, up_n, down_n, p, up_p, down_p),
+            silent=True,
+            **kwargs
+        )
+        n, up_n, down_n = iDEA.observables.density(
+            s_fictitious, state=state, return_spins=True
+        )
+        p, up_p, down_p = iDEA.observables.density_matrix(
+            s_fictitious, state=state, return_spins=True
+        )
+
+        # Calculate the potential and objective functional; potential updated on next step of loop if necessary
+        diff_n = target_n - n
+        v_correct = iDEA.observables.hartree_potential(s, diff_n)
+        convergence = iDEA.observables.hartree_energy(s, diff_n, v_correct)
+
+    if silent is False:
+        print(
+            "iDEA.reverse_engineering.reverse_lfx: Converged within {} steps".format(
+                nsteps
+            )
+        )
+    return s_fictitious
+
+
 def _residual(
     v: np.ndarray,
     s_fictitious: iDEA.system.System,
