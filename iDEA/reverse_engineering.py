@@ -56,7 +56,9 @@ def reverse(
     up_p = np.zeros(shape=s.x.shape * 2)
     down_p = np.zeros(shape=s.x.shape * 2)
     convergence = 1.0
+    nsteps = 0
     while convergence > tol:
+        nsteps += 1
         if silent is False:
             print(
                 r"iDEA.reverse_engineering.reverse: convergence = {0:.5}, tolerance = {1:.5}".format(
@@ -79,7 +81,7 @@ def reverse(
         s_fictitious.v_ext += mu * (n**pe - target_n**pe)
         convergence = np.sum(abs(n - target_n)) * s.dx
     if silent is False:
-        print()
+        print("iDEA.reverse_engineering.reverse: Converged within {} steps".format(nsteps))
     return s_fictitious
 
 
